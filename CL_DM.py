@@ -7,6 +7,31 @@ import copy
 import gc
 
 
+def gradient_matching_attack(model, images, labels, criterion, optimizer, noise_factor=0.1):
+    """
+    Performs gradient matching attack by modifying gradients after backward pass.
+    """
+    # Forward pass
+    outputs = model(images)
+    loss = criterion(outputs, labels)
+
+    # Zero previous gradients
+    optimizer.zero_grad()
+
+    # Backward pass (calculate gradients)
+    loss.backward()
+
+    # Modify gradients as part of the attack
+    for param in model.parameters():
+        if param.grad is not None:
+            param.grad += torch.randn_like(param.grad) * noise_factor  # Add Gaussian noise
+
+    # Perform gradient descent
+    optimizer.step()
+
+    return loss
+
+
 def main():
     parser = argparse.ArgumentParser(description='Parameter Processing')
     parser.add_argument('--method', type=str, default='random', help='random/herding/DSA/DM')
@@ -19,18 +44,18 @@ def main():
     parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating network parameters')
     parser.add_argument('--batch_train', type=int, default=256, help='batch size for training networks')
     parser.add_argument('--data_path', type=str, default='./../data', help='dataset path')
-
+    parser.add_argument('--gma', type=bool, default=False, help='Enable Gradient Matching Attack')
+    
     args = parser.parse_args()
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     args.dsa_param = ParamDiffAug()
-    args.dsa = True # augment images for all methods
-    args.dsa_strategy = 'color_crop_cutout_flip_scale_rotate' # for CIFAR10/100
+    args.dsa = True  # augment images for all methods
+    args.dsa_strategy = 'color_crop_cutout_flip_scale_rotate'  # for CIFAR10/100
 
     if not os.path.exists(args.data_path):
         os.mkdir(args.data_path)
 
     channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path)
-
 
     ''' all training data '''
     images_all = []
@@ -44,9 +69,6 @@ def main():
     images_all = torch.cat(images_all, dim=0).to(args.device)
     labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
 
-    # for c in range(num_classes):
-    #     print('class c = %d: %d real images' % (c, len(indices_class[c])))
-
     def get_images(c, n):  # get random n images from class c
         idx_shuffle = np.random.permutation(indices_class[c])[:n]
         return images_all[idx_shuffle]
@@ -54,7 +76,7 @@ def main():
     print()
     print('==================================================================================')
     print('method: ', args.method)
-    results = np.zeros((args.steps, 5*args.num_eval))
+    results = np.zeros((args.steps, 5 * args.num_eval))
 
     for seed_cl in range(5):
         num_classes_step = num_classes // args.steps
@@ -66,6 +88,7 @@ def main():
         print('augmentation strategy: \n', args.dsa_strategy)
         print('augmentation parameters: \n', args.dsa_param.__dict__)
 
+        # Choose method
         if args.method == 'random':
             images_train_all = []
             labels_train_all = []
@@ -75,42 +98,39 @@ def main():
                 labels_train_all += [torch.tensor([c for c in classes_current for i in range(args.ipc)], dtype=torch.long, device=args.device)]
 
         elif args.method == 'herding':
-            fname = os.path.join(args.data_path, 'metasets', 'cl_data', 'cl_herding_CIFAR100_ConvNet_20ipc_%dsteps_seed%d.pt'%(args.steps, seed_cl))
+            fname = os.path.join(args.data_path, 'metasets', 'cl_data', 'cl_herding_CIFAR100_ConvNet_20ipc_%dsteps_seed%d.pt' % (args.steps, seed_cl))
             data = torch.load(fname, map_location='cpu')['data']
             images_train_all = [data[step][0] for step in range(args.steps)]
             labels_train_all = [data[step][1] for step in range(args.steps)]
             print('use data: ', fname)
 
         elif args.method == 'DSA':
-            fname = os.path.join(args.data_path, 'metasets', 'cl_data', 'cl_res_DSA_CIFAR100_ConvNet_20ipc_%dsteps_seed%d.pt'%(args.steps, seed_cl))
+            fname = os.path.join(args.data_path, 'metasets', 'cl_data', 'cl_res_DSA_CIFAR100_ConvNet_20ipc_%dsteps_seed%d.pt' % (args.steps, seed_cl))
             data = torch.load(fname, map_location='cpu')['data']
             images_train_all = [data[step][0] for step in range(args.steps)]
             labels_train_all = [data[step][1] for step in range(args.steps)]
             print('use data: ', fname)
 
         elif args.method == 'DM':
-            fname = os.path.join(args.data_path, 'metasets', 'cl_data', 'cl_DM_CIFAR100_ConvNet_20ipc_%dsteps_seed%d.pt'%(args.steps, seed_cl))
+            fname = os.path.join(args.data_path, 'metasets', 'cl_data', 'cl_DM_CIFAR100_ConvNet_20ipc_%dsteps_seed%d.pt' % (args.steps, seed_cl))
             data = torch.load(fname, map_location='cpu')['data']
             images_train_all = [data[step][0] for step in range(args.steps)]
             labels_train_all = [data[step][1] for step in range(args.steps)]
             print('use data: ', fname)
 
         else:
-            exit('unknown method: %s'%args.method)
-
+            exit('unknown method: %s' % args.method)
 
         for step in range(args.steps):
             print('\n-----------------------------\nmethod %s seed %d step %d ' % (args.method, seed_cl, step))
 
-            classes_seen = class_order[: (step+1)*num_classes_step]
+            classes_seen = class_order[: (step + 1) * num_classes_step]
             print('classes_seen: ', classes_seen)
 
-
             ''' train data '''
-            images_train = torch.cat(images_train_all[:step+1], dim=0).to(args.device)
-            labels_train = torch.cat(labels_train_all[:step+1], dim=0).to(args.device)
+            images_train = torch.cat(images_train_all[:step + 1], dim=0).to(args.device)
+            labels_train = torch.cat(labels_train_all[:step + 1], dim=0).to(args.device)
             print('train data size: ', images_train.shape)
-
 
             ''' test data '''
             images_test = []
@@ -128,7 +148,6 @@ def main():
 
             print('test set size: ', images_test.shape)
 
-
             ''' train model on the newest memory '''
             accs = []
             for ep_eval in range(args.num_eval):
@@ -137,26 +156,34 @@ def main():
                 img_syn_eval = copy.deepcopy(images_train.detach())
                 lab_syn_eval = copy.deepcopy(labels_train.detach())
 
+                # Choose to apply GMA or not
+                optimizer = torch.optim.SGD(net_eval.parameters(), lr=args.lr_net)
+                criterion = torch.nn.CrossEntropyLoss()
+
+                if args.gma:
+                    loss = gradient_matching_attack(net_eval, img_syn_eval, lab_syn_eval, criterion, optimizer, noise_factor=0.1)
+                else:
+                    optimizer.zero_grad()
+                    outputs = net_eval(img_syn_eval)
+                    loss = criterion(outputs, lab_syn_eval)
+                    loss.backward()
+                    optimizer.step()
+
                 _, acc_train, acc_test = evaluate_synset(ep_eval, net_eval, img_syn_eval, lab_syn_eval, testloader, args)
                 del net_eval, img_syn_eval, lab_syn_eval
                 gc.collect()  # to reduce memory cost
                 accs.append(acc_test)
-                results[step, seed_cl*args.num_eval + ep_eval] = acc_test
+                results[step, seed_cl * args.num_eval + ep_eval] = acc_test
             print('Evaluate %d random %s, mean = %.4f std = %.4f' % (len(accs), args.model, np.mean(accs), np.std(accs)))
-
 
     results_str = ''
     for step in range(args.steps):
         results_str += '& %.1f$\pm$%.1f  ' % (np.mean(results[step]) * 100, np.std(results[step]) * 100)
     print('\n\n')
-    print('%d step learning %s perforamnce:'%(args.steps, args.method))
+    print('%d step learning %s performance:' % (args.steps, args.method))
     print(results_str)
     print('Done')
 
 
 if __name__ == '__main__':
     main()
-
-
-
-
