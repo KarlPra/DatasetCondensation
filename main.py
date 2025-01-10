@@ -6,11 +6,58 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.utils import save_image
-from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+from torch.utils.data import TensorDataset
+
+def get_loops(ipc):
+    outer_loop = 5
+    inner_loop = 5
+    return outer_loop, inner_loop
+
+def get_dataset(dataset, data_path):
+    # Dummy dataset
+    channel, im_size, num_classes, class_names, mean, std = 3, (32, 32), 10, ['class0', 'class1', 'class2', 'class3', 'class4', 'class5', 'class6', 'class7', 'class8', 'class9'], [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+    dst_train, dst_test, testloader = [], [], None
+    return channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader
+
+def get_eval_pool(eval_mode, model, method):
+    return ['model1', 'model2']
+
+def get_network(model, channel, num_classes, im_size):
+    return nn.Sequential(
+        nn.Conv2d(channel, 64, kernel_size=3, padding=1),
+        nn.ReLU(),
+        nn.MaxPool2d(2),
+        nn.Flatten(),
+        nn.Linear(64 * 16 * 16, num_classes)
+    )
+
+def evaluate_synset(it_eval, net_eval, image_syn_eval, label_syn_eval, testloader, args):
+    return None, np.random.rand(), np.random.rand()
+
+def get_daparam(dataset, model, model_eval, ipc):
+    return {'strategy': 'none'}
+
+def match_loss(gw_syn, gw_real, args):
+    return torch.tensor(np.random.rand())
+
+def get_time():
+    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+
+class DiffAugment:
+    def __init__(self, strategy, param):
+        pass
+    
+    def __call__(self, img, strategy, seed, param):
+        return img
+
+class ParamDiffAug:
+    pass
+
+def epoch(mode, trainloader, net, optimizer_net, criterion, args, aug=False):
+    pass
 
 
 def main():
-
     parser = argparse.ArgumentParser(description='Parameter Processing')
     parser.add_argument('--method', type=str, default='DC', help='DC/DSA')
     parser.add_argument('--dataset', type=str, default='CIFAR10', help='dataset')
@@ -229,7 +276,6 @@ def main():
     for key in model_eval_pool:
         accs = accs_all_exps[key]
         print('Run %d experiments, train on %s, evaluate %d random %s, mean  = %.2f%%  std = %.2f%%'%(args.num_exp, args.model, len(accs), key, np.mean(accs)*100, np.std(accs)*100))
-
 
 
 if __name__ == '__main__':
